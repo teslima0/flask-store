@@ -5,6 +5,7 @@ import bcrypt
 from .import app, db
 from .models import User, Customer, StoreOwner,Store,Location
 from geopy.distance import distance
+import openrouteservice
 
 views= Blueprint('views',__name__)
 # User registration endpoint
@@ -174,3 +175,34 @@ def nearest_stores():
         })
 
     return jsonify({'stores': closest_stores})
+
+
+
+@views.route('/travel-time', methods=['POST'])
+@jwt_required()
+def travel_time():
+    # Get user identity from access token
+    email = get_jwt_identity()
+
+    # Get data from request
+    store_id = request.json.get('store_id')
+
+    # Get customer with location
+    customer = Customer.query.filter_by(email=email).join(Location).filter(Location.latitude != None, Location.longitude != None).first()
+    if not customer:
+        return jsonify({'message': 'Could not find customer location'}), 404
+
+    # Get store with location
+    store = Store.query.filter_by(id=store_id).join(Location).filter(Location.latitude != None, Location.longitude != None).first()
+    if not store:
+        return jsonify({'message': 'Could not find store location'}), 404
+
+    # Calculate travel time
+    client = openrouteservice.Client(key='YOUR_API_KEY')
+    coords = ((customer.location.longitude, customer.location.latitude), (store.location.longitude, store.location.latitude))
+    routes = client.directions(coords, profile='driving-car', format='geojson')
+    if not routes['features']:
+        return jsonify({'message': 'Could not calculate travel time'})
+    travel_time = routes['features'][0]['properties']['segments'][0]['duration']
+
+    return jsonify({'travel_time': travel_time})
