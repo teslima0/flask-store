@@ -134,6 +134,79 @@ def create_store():
     return jsonify({'message': 'Store created successfully'}), 201
 
 
+import requests
+
+def get_travel_time_minutes(origin, destination):
+    """
+    Returns the estimated travel time in minutes between an origin and destination
+    using the OpenRouteService API.
+    """
+    api_key="5b3ce3597851110001cf62484d34b616962d40df97c8364a58852331"
+    
+    url = f'https://api.openrouteservice.org/v2/directions/driving-car?api_key={api_key}&start={origin[1]},{origin[0]}&end={destination[1]},{destination[0]}'
+    response = requests.get(url)
+    if response.status_code != 200:
+        return None
+    json_response = response.json()
+    try:
+        travel_time_seconds = json_response['features'][0]['properties']['segments'][0]['duration']
+    except:
+        return None
+    travel_time_minutes = travel_time_seconds / 60
+    return f'{travel_time_minutes:.2f} minutes'
+
+@views.route('/nearestStores', methods=['GET'])
+@jwt_required()
+def nearestStores():
+  
+    # Query for customer with location
+    customer_with_location = Customer.query.join(Location).filter(Location.latitude != None, Location.longitude != None).first()
+    if not customer_with_location:
+        return jsonify({'error': 'Customer location not provided.'}), 400
+
+    # Parse the customer's location
+    try:
+        
+        customer_latitude=customer_with_location.location.latitude
+
+        customer_longitude = customer_with_location.location.longitude
+    except ValueError:
+        return jsonify({'error': 'Invalid customer location format.'}), 400
+
+    # Query for stores with locations
+    stores_with_locations = Store.query.join(Location).filter(Location.latitude != None, Location.longitude != None).all()
+
+    # Calculate distance and travel time between user location and store locations
+    store_distances = []
+    for store in stores_with_locations:
+        store_location = (store.location.latitude, store.location.longitude)
+        dist = distance((customer_latitude, customer_longitude), store_location).km
+
+        # Call the OpenRouteService API to get the travel time
+        travel_time_minutes = get_travel_time_minutes((customer_latitude, customer_longitude), store_location)
+
+        store_distances.append((store, dist, travel_time_minutes))
+
+    # Sort stores by distance
+    store_distances.sort(key=lambda x: x[1])
+
+    # Return the 10 closest stores
+    closest_stores = []
+    for store, dist, travel_time_minutes in store_distances[:10]:
+        closest_stores.append({
+            'name': store.name,
+            'description': store.description,
+            'distance': f'{dist:.2f} km',
+            'travel_time': travel_time_minutes,
+            'location': {
+                'street_name': store.location.street_name,
+                'latitude': store.location.latitude,
+                'longitude': store.location.longitude
+            }
+        })
+
+    return jsonify({'stores': closest_stores})
+
 
 @views.route('/nearest-stores', methods=['GET'])
 @jwt_required()
@@ -189,20 +262,24 @@ def travel_time():
 
     # Get customer with location
     customer = Customer.query.filter_by(email=email).join(Location).filter(Location.latitude != None, Location.longitude != None).first()
-    if not customer:
-        return jsonify({'message': 'Could not find customer location'}), 404
-
+  
+    #if not customer:
+        #return jsonify({'message': 'Could not find customer location'}), 404
+    
     # Get store with location
     store = Store.query.filter_by(id=store_id).join(Location).filter(Location.latitude != None, Location.longitude != None).first()
     if not store:
         return jsonify({'message': 'Could not find store location'}), 404
 
     # Calculate travel time
-    client = openrouteservice.Client(key='YOUR_API_KEY')
+    client = openrouteservice.Client(key='5b3ce3597851110001cf62484d34b616962d40df97c8364a58852331')
     coords = ((customer.location.longitude, customer.location.latitude), (store.location.longitude, store.location.latitude))
     routes = client.directions(coords, profile='driving-car', format='geojson')
     if not routes['features']:
         return jsonify({'message': 'Could not calculate travel time'})
-    travel_time = routes['features'][0]['properties']['segments'][0]['duration']
+    travel_time_seconds = routes['features'][0]['properties']['segments'][0]['duration']
+    
+    travel_time_minutes = travel_time_seconds / 60.0
+    travel_time_minutes_formatted = '{:.2f}'.format(travel_time_minutes)
 
-    return jsonify({'travel_time': travel_time})
+    return jsonify({'travel_time': str(travel_time_minutes_formatted)+" minutes"})

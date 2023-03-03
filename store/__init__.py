@@ -14,7 +14,7 @@ def create_app():
     #app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///project.db" 
     app.config["SQLALCHEMY_DATABASE_URI"] = 'mysql+pymysql://root:@localhost/flask-store-db' 
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS']=False
-
+    app.config['api_key']= os.getenv('api_key')
     
     db.init_app(app)
   
